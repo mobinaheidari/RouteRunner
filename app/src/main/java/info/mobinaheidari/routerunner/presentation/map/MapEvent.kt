@@ -19,8 +19,7 @@ sealed class MapEvent {
      *
      * @property userId The unique identifier of the user to associate location data with.
      */
-    data class StartTracking(val userId: Long): MapEvent()
-
+    data class StartTracking(val userId: Long) : MapEvent()
     /**
      * Signals the intent to stop the ongoing route recording.
      *

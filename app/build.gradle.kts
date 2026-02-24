@@ -106,4 +106,14 @@ dependencies {
 
 
     implementation(libs.androidx.material.icons.extended)
+
+    implementation(project(":location"))
+    implementation("com.google.android.gms:play-services-location:21.0.1")
+    implementation("com.google.maps.android:maps-compose:4.3.0")
+
+    // Standard Maps
+    implementation("com.google.android.gms:play-services-maps:18.2.0")
+
+    // 🟢 MANDATORY: This provides .data, GeoJsonLayer, and GeoJsonPolygon
+    implementation("com.google.maps.android:android-maps-utils:3.8.2")
 }

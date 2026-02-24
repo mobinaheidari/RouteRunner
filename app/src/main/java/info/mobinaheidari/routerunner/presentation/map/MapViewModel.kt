@@ -1,11 +1,10 @@
 package info.mobinaheidari.routerunner.presentation.map
 
+
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import info.mobinaheidari.routerunner.data.local.AppDao
-import info.mobinaheidari.routerunner.domain.location.LocationClient
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -15,6 +14,9 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import javax.inject.Inject
+import info.mobinaheidari.routerunner.data.local.AppDao // For your local DB
+import info.mobinaheidari.location.LocationClient
+import info.mobinaheidari.routerunner.data.local.SessionManager
 
 /**
  * ViewModel responsible for managing the state and business logic of the Map Screen.
@@ -31,7 +33,8 @@ import javax.inject.Inject
 @HiltViewModel
 class MapViewModel @Inject constructor(
     private val dao: AppDao,
-    private val locationClient: LocationClient
+    private val locationClient: LocationClient,
+    private val sessionManager: SessionManager
 ) : ViewModel() {
 
     // Backing property for the UI state
@@ -55,10 +58,10 @@ class MapViewModel @Inject constructor(
             }
 
             is MapEvent.StartTracking -> {
-                // Delegate service start to the client (keeps ViewModel android-free regarding Intents)
-                locationClient.startLocationTracking(event.userId)
-
-                // Update UI: Toggle tracking flag and hide download button
+                // 🟢 Save the user as the "Active" user before starting the service
+                sessionManager.saveActiveUserId(event.userId)
+                // Start the clean service (No ID passed!)
+                locationClient.startLocationTracking()
                 _state.update { it.copy(isTracking = true, showDownloadButton = false) }
             }
 

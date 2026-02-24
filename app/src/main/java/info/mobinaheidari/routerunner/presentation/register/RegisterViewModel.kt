@@ -30,6 +30,7 @@ class RegisterViewModel @Inject constructor(
     // Backing property for mutable state
     private val _state = MutableStateFlow(RegisterState())
 
+
     /**
      * Exposes the current registration state as a read-only [StateFlow] to the UI.
      * The UI observes this to update text fields and show/hide error messages.

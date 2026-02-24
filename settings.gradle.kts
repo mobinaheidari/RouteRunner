@@ -35,4 +35,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "RouteRunner"
 include(":app")
- 
+include(":location")

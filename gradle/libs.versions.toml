@@ -18,6 +18,8 @@ mapsCompose = "4.4.1" # Modern Maps Compose
 playServicesMaps = "18.2.0"
 playServicesLocation = "21.3.0"
 accompanist = "0.34.0"
+appcompat = "1.7.1"
+material = "1.13.0"
 
 [libraries]
 # --- Your Existing Libraries ---
@@ -58,6 +60,8 @@ play-services-location = { group = "com.google.android.gms", name = "play-servic
 
 # Permissions
 accompanist-permissions = { group = "com.google.accompanist", name = "accompanist-permissions", version.ref = "accompanist" }
+androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
+material = { group = "com.google.android.material", name = "material", version.ref = "material" }
 
 [plugins]
 # --- Your Existing Plugins ---
@@ -67,3 +71,4 @@ kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "ko
 
 # --- Added for RouteRunner ---
 hilt-android = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }
+android-library = { id = "com.android.library", version.ref = "agp" }

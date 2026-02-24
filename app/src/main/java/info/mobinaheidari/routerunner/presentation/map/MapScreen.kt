@@ -1,5 +1,6 @@
 package info.mobinaheidari.routerunner.presentation.map
 
+// 🟢 NEW: Import the helper from your location module
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
@@ -8,9 +9,26 @@ import android.content.Intent
 import android.content.IntentSender
 import android.content.pm.PackageManager
 import android.widget.Toast
-import androidx.compose.foundation.layout.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -20,28 +38,28 @@ import androidx.core.content.FileProvider
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
 import com.google.android.gms.common.api.ResolvableApiException
-import com.google.android.gms.location.*
+import com.google.android.gms.location.LocationRequest
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.LocationSettingsRequest
+import com.google.android.gms.location.Priority
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
-import com.google.maps.android.compose.*
+import com.google.maps.android.compose.GoogleMap
+import com.google.maps.android.compose.MapProperties
+import com.google.maps.android.compose.MapType
+import com.google.maps.android.compose.MapUiSettings
+import com.google.maps.android.compose.Marker
+import com.google.maps.android.compose.MarkerState
+import com.google.maps.android.compose.Polygon
+import com.google.maps.android.compose.Polyline
+import com.google.maps.android.compose.rememberCameraPositionState
+import info.mobinaheidari.location.GeoJsonHelper
+import info.mobinaheidari.routerunner.data.local.LocationEntity
 import info.mobinaheidari.routerunner.presentation.navigation.Screen
 import java.io.File
 
-/**
- * The main screen responsible for the map interface and tracking controls.
- *
- * This Composable integrates the Google Maps SDK to visualize the user's route.
- * It observes the [MapViewModel] state to:
- * 1. Draw a [Polyline] representing the recorded path.
- * 2. Animate the camera to follow the user during tracking.
- * 3. Manage the state of control buttons (Start, Stop, Share).
- *
- * @param navController Used for navigation (e.g., logging out).
- * @param userId The ID of the current user, used to load specific route data.
- * @param viewModel The state holder injected via Hilt.
- */
-@SuppressLint("MissingPermission") // Permissions are requested in MainActivity before navigating here.
+@SuppressLint("MissingPermission")
 @Composable
 fun MapScreen(
     navController: NavController,
@@ -49,106 +67,150 @@ fun MapScreen(
     viewModel: MapViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
-
-    // Collect UI state from ViewModel (Reactive UI)
     val state by viewModel.state.collectAsState()
 
-    // --- Map Configuration ---
-
-    // Transformation: Convert DB Entities -> Google Maps LatLng objects
-    val pathPoints = state.locations.map { LatLng(it.latitude, it.longitude) }
-
-    // Client for "One-time" location checks (e.g., centering map on load)
-    val fusedLocationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
-
-    // Default Camera Position (Fallback: Tehran) if GPS is cold/disabled
-    val defaultLocation = LatLng(35.6892, 51.3890)
-    val cameraPositionState = rememberCameraPositionState {
-        position = CameraPosition.fromLatLngZoom(defaultLocation, 12f)
+    // 🟢 1. LOAD POLYGON: Fetch coordinates from the helper in the :location module
+    val polygonPoints by produceState<List<LatLng>>(initialValue = emptyList()) {
+        // This runs in a background thread automatically
+        value = GeoJsonHelper.getPolygonCoordinates(context)
     }
 
-    // --- Side Effects (Lifecycle Handling) ---
+    // 🟢 2. SEGMENTATION LOGIC:
+    // Instead of mapping to a single list of points, we split them into segments.
+    // This ensures that if the user goes OUTSIDE (recording stops), we don't draw a
+    // straight line across the forbidden zone when they come back IN.
+    val pathSegments = remember(state.locations) {
+        createDiscontinuousSegments(state.locations)
+    }
 
-    // 1. Initialization: Load data and check GPS settings when the screen opens.
+    // 📍 CALCULATE CURRENT LOCATION
+    val lastPoint = state.locations.lastOrNull()
+    val currentLatLng = if (lastPoint != null) {
+        LatLng(lastPoint.latitude, lastPoint.longitude)
+    } else {
+        LatLng(35.722, 51.385) // Default center (Tehran)
+    }
+
+    // 🔵 RESTORED LOGIC: Initialize FusedLocationClient for the "First Launch" check
+    val fusedLocationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
+
+    // Initialize Camera
+    val cameraPositionState = rememberCameraPositionState {
+        position = CameraPosition.fromLatLngZoom(currentLatLng, 15f)
+    }
+
+    // 1. Initialization & Initial Center
     LaunchedEffect(userId) {
         viewModel.onEvent(MapEvent.LoadLocations(userId))
         checkAndEnableLocation(context)
 
-        // Attempt to center camera on the user's last known location
-        if (ActivityCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+        // 🔵 RESTORED LOGIC: If DB is empty, try to get real GPS location instead of default
+        if (state.locations.isEmpty() &&
+            ActivityCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        ) {
             fusedLocationClient.lastLocation.addOnSuccessListener { location ->
                 if (location != null) {
-                    val currentLatLng = LatLng(location.latitude, location.longitude)
-                    cameraPositionState.position = CameraPosition.fromLatLngZoom(currentLatLng, 17f)
-                }
-            }
-        }
-    }
-
-    // 2. Camera Tracking: Automatically follow the user when a new point is recorded.
-    LaunchedEffect(state.locations) {
-        if (state.locations.isNotEmpty() && state.isTracking) {
-            val lastPoint = LatLng(state.locations.last().latitude, state.locations.last().longitude)
-            cameraPositionState.animate(
-                update = CameraUpdateFactory.newLatLngZoom(lastPoint, 17f),
-                durationMs = 1000 // Smooth animation over 1 second
-            )
-        }
-    }
-
-    // 3. Transient Feedback: Show Toasts for temporary errors/messages.
-    LaunchedEffect(state.errorMessage) {
-        if (state.errorMessage != null) {
-            Toast.makeText(context, state.errorMessage, Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    // --- UI Layout ---
-    Column(modifier = Modifier.fillMaxSize()) {
-
-        // Region: Map View
-        Box(modifier = Modifier.weight(1f)) {
-            GoogleMap(
-                modifier = Modifier.fillMaxSize(),
-                cameraPositionState = cameraPositionState,
-                // Enable "My Location" blue dot and system UI
-                properties = MapProperties(
-                    isMyLocationEnabled = true,
-                    mapType = MapType.NORMAL
-                ),
-                uiSettings = MapUiSettings(
-                    myLocationButtonEnabled = true,
-                    zoomControlsEnabled = true,
-                    compassEnabled = true
-                )
-            ) {
-                // Draw the route path
-                if (pathPoints.isNotEmpty()) {
-                    Polyline(
-                        points = pathPoints,
-                        color = Color.Blue,
-                        width = 15f
+                    cameraPositionState.position = CameraPosition.fromLatLngZoom(
+                        LatLng(location.latitude, location.longitude), 15f
                     )
                 }
             }
         }
+    }
 
-        // Region: Control Panel (Bottom Bar)
+    // 2. Camera Tracking (Auto-follow)
+    LaunchedEffect(currentLatLng) {
+        if (state.isTracking && lastPoint != null) {
+            cameraPositionState.animate(
+                update = CameraUpdateFactory.newLatLng(currentLatLng),
+                durationMs = 1000
+            )
+        }
+    }
+
+    // 3. Error Handling
+    LaunchedEffect(state.errorMessage) {
+        state.errorMessage?.let { msg ->
+            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+
+        Box(modifier = Modifier.weight(1f)) {
+            GoogleMap(
+                modifier = Modifier.fillMaxSize(),
+                cameraPositionState = cameraPositionState,
+                // Disable Google's Blue Dot (we draw our own)
+                properties = MapProperties(
+                    isMyLocationEnabled = false,
+                    mapType = MapType.NORMAL
+                ),
+                uiSettings = MapUiSettings(
+                    myLocationButtonEnabled = false,
+                    zoomControlsEnabled = true,
+                    compassEnabled = true
+                )
+            ) {
+                // 🟢 DRAW POLYGON (The Allowed Zone)
+                if (polygonPoints.isNotEmpty()) {
+                    Polygon(
+                        points = polygonPoints,
+                        fillColor = Color.Blue.copy(alpha = 0.15f), // Transparent Blue
+                        strokeColor = Color.Blue,
+                        strokeWidth = 3f
+                    )
+                }
+
+                // 🟢 DRAW PATH SEGMENTS
+                // We iterate through the segments. If the path is continuous, this loop runs once.
+                // If there are gaps (user went outside), it draws multiple separate lines.
+                pathSegments.forEach { segment ->
+                    Polyline(
+                        points = segment,
+                        color = Color.Red,
+                        width = 5f,
+                        zIndex = 10f // 🟢 ADD THIS: Forces the line to be drawn ON TOP of the polygon
+                    )
+                }
+
+                // Manual Marker (Your custom "Blue Dot")
+                if (lastPoint != null) {
+                    Marker(
+                        state = MarkerState(position = currentLatLng),
+                        title = "Current Location",
+                        snippet = "Lat: ${lastPoint.latitude}, Lng: ${lastPoint.longitude}"
+                    )
+                }
+            }
+            Text(
+                text = "Points: ${state.locations.size}\nSegments: ${pathSegments.size}",
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 80.dp) // Move down so it doesn't overlap buttons
+                    .background(Color.White)
+                    .padding(8.dp),
+                color = Color.Black,
+                style = MaterialTheme.typography.bodyLarge
+            )
+        }
+
+        // Region: Control Panel (Kept exactly as original)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(16.dp),
             horizontalArrangement = Arrangement.SpaceEvenly
         ) {
-
-            // State A: Idle (Ready to Start)
+            // State A: Idle
             if (!state.isTracking && !state.showDownloadButton) {
+                // Inside MapScreen Composable Button
                 Button(onClick = {
-                    viewModel.onEvent(MapEvent.StartTracking(userId))
+                    viewModel.onEvent(MapEvent.StartTracking(userId)) // 🟢 Use 'userId' from MapScreen params
                 }) { Text("Start Tracking") }
             }
 
-            // State B: Tracking Active
+            // State B: Tracking
             if (state.isTracking) {
                 Button(
                     onClick = {
@@ -158,17 +220,16 @@ fun MapScreen(
                 ) { Text("Stop Tracking") }
             }
 
-            // State C: Finished (Ready to Export)
+            // State C: Finished
             if (state.showDownloadButton) {
                 Button(onClick = {
                     viewModel.onEvent(MapEvent.ExportCsv(context, userId) { file ->
-                        // Trigger external share intent upon successful file generation
                         shareCsvFile(context, file)
                     })
                 }) { Text("Share / Save CSV") }
             }
 
-            // Logout Action (Always accessible)
+            // Logout
             OutlinedButton(onClick = {
                 viewModel.onEvent(MapEvent.Logout(context) {
                     navController.navigate(Screen.Welcome.route) { popUpTo(0) }
@@ -181,15 +242,47 @@ fun MapScreen(
 // --- Helper Functions ---
 
 /**
- * Launches an Android System Intent to share the generated CSV file.
- *
- * Uses [FileProvider] to securely share the file with other apps (Gmail, Telegram, Drive, etc.).
- *
- * @param context Required to access the package manager and resources.
- * @param file The CSV file stored in the app's private storage.
+ * 🟢 NEW HELPER: Splits the path into segments based on time gaps.
+ * If the gap between two points is > 20 seconds, we assume recording paused (user outside).
  */
+fun createDiscontinuousSegments(locations: List<LocationEntity>): List<List<LatLng>> {
+    if (locations.isEmpty()) return emptyList()
+
+    val segments = mutableListOf<List<LatLng>>()
+    var currentSegment = mutableListOf<LatLng>()
+
+    // Sort to ensure time order
+    val sortedLocs = locations.sortedBy { it.timestamp }
+
+    if (sortedLocs.isNotEmpty()) {
+        currentSegment.add(LatLng(sortedLocs[0].latitude, sortedLocs[0].longitude))
+    }
+
+    for (i in 0 until sortedLocs.size - 1) {
+        val p1 = sortedLocs[i]
+        val p2 = sortedLocs[i+1]
+
+        // Time difference check (20 seconds = 20,000 ms)
+        // Adjust this threshold if your update interval changes.
+        val timeDiff = p2.timestamp - p1.timestamp
+
+        if (timeDiff > 30_000) {
+            segments.add(currentSegment)
+            currentSegment = mutableListOf()
+        }
+        currentSegment.add(LatLng(p2.latitude, p2.longitude))
+    }
+
+    if (currentSegment.isNotEmpty()) {
+        segments.add(currentSegment)
+    }
+
+    return segments
+}
+
+// --- Original Helpers (Preserved) ---
+
 fun shareCsvFile(context: Context, file: File) {
-    // Create a content URI for the file (requires <provider> in Manifest)
     val uri = FileProvider.getUriForFile(
         context,
         "${context.packageName}.provider",
@@ -197,24 +290,13 @@ fun shareCsvFile(context: Context, file: File) {
     )
 
     val shareIntent = Intent(Intent.ACTION_SEND).apply {
-        type = "text/csv" // MIME Type
+        type = "text/csv"
         putExtra(Intent.EXTRA_STREAM, uri)
-        // Grant temporary read permission to the receiving app
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
-
-    // Launch the chooser dialog
     context.startActivity(Intent.createChooser(shareIntent, "Share Route Data"))
 }
 
-/**
- * Checks if the device's Location Services (GPS) are enabled and configured for High Accuracy.
- *
- * If not, it triggers a system dialog ([ResolvableApiException]) prompting the user to enable them
- * without leaving the app.
- *
- * @param context The Activity context needed to launch the resolution dialog.
- */
 fun checkAndEnableLocation(context: Context) {
     val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000).build()
     val builder = LocationSettingsRequest.Builder().addLocationRequest(locationRequest)
@@ -224,7 +306,6 @@ fun checkAndEnableLocation(context: Context) {
     task.addOnFailureListener { exception ->
         if (exception is ResolvableApiException) {
             try {
-                // Show the "Turn on GPS" dialog
                 val activity = context as? Activity
                 activity?.let {
                     exception.startResolutionForResult(it, 1001)

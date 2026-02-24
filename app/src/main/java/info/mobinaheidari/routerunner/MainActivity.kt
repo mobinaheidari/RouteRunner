@@ -1,6 +1,9 @@
 package info.mobinaheidari.routerunner
 
 import android.Manifest
+import android.content.Context
+import android.content.IntentFilter
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -24,6 +27,9 @@ import info.mobinaheidari.routerunner.presentation.map.MapScreen
 import info.mobinaheidari.routerunner.presentation.navigation.Screen
 import info.mobinaheidari.routerunner.presentation.register.RegisterScreen
 import info.mobinaheidari.routerunner.presentation.welcome.WelcomeScreen
+import javax.inject.Inject
+import androidx.core.content.ContextCompat
+import info.mobinaheidari.routerunner.data.receiver.LocationReceiver
 
 /**
  * The single Activity for the application, serving as the entry point for the UI.
@@ -33,11 +39,33 @@ import info.mobinaheidari.routerunner.presentation.welcome.WelcomeScreen
  */
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+    // Inject the CLEAN receiver (Hilt fills the DAO automatically)
+    @Inject
+    lateinit var locationReceiver: LocationReceiver
+
+
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // 1. Register here (When app is created)
+        val filter = IntentFilter("ACTION_LOCATION_UPDATE")
+        ContextCompat.registerReceiver(
+            this,
+            locationReceiver,
+            filter,
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+
         setContent {
             RouteRunnerNavHost()
         }
+    }
+    override fun onDestroy() {
+        super.onDestroy()
+        // 2. Unregister here (When app is fully destroyed)
+        // This ensures tracking continues even if the user locks the screen or switches apps.
+        unregisterReceiver(locationReceiver)
     }
 }
 
@@ -59,12 +87,17 @@ fun RouteRunnerNavHost() {
     // ACCESS_FINE_LOCATION: For precise GPS tracking.
     // ACCESS_COARSE_LOCATION: Required by API 31+ when requesting fine location.
     // POST_NOTIFICATIONS: Required by API 33+ for Foreground Service notifications.
+    val permissionsToRequest = mutableListOf(
+        Manifest.permission.ACCESS_FINE_LOCATION,
+        Manifest.permission.ACCESS_COARSE_LOCATION
+    )
+// Only add notification permission if the phone is new enough (Android 13+)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        permissionsToRequest.add(Manifest.permission.POST_NOTIFICATIONS)
+    }
+
     val permissionsState = rememberMultiplePermissionsState(
-        permissions = listOf(
-            Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.ACCESS_COARSE_LOCATION,
-            Manifest.permission.POST_NOTIFICATIONS
-        )
+        permissions = permissionsToRequest
     )
 
     // 2. Check the current permission status.

@@ -6,8 +6,8 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
-import info.mobinaheidari.routerunner.data.location.DefaultLocationClient
-import info.mobinaheidari.routerunner.domain.location.LocationClient
+import info.mobinaheidari.location.LocationClient        // <-- New Module
+import info.mobinaheidari.location.DefaultLocationClient
 import javax.inject.Singleton
 
 /**
