@@ -37,7 +37,7 @@ This project heavily enforces the official Google architecture guidelines, separ
 * **Responsibilities:** Manages the FusedLocationProvider, handles foreground service notifications, runs the mathematical geofencing logic, and broadcasts pure, raw `LatLng` data to the system.
 
 ## 📸 Screenshots
-*(Add a link to your screenshots or GIFs here showing the route tracking and edge snapping!)*
+
 
 ## 🤝 Contribution
 
